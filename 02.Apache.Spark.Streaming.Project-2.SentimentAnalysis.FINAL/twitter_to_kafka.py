@@ -31,6 +31,7 @@ class TweeterStreamListener(tweepy.StreamListener):
         return True
 
     def on_error(self, status_code):
+        print( status_code )
         print("Error received in kafka producer")
         return True # Don't kill the stream
 

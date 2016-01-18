@@ -5,6 +5,8 @@
 ### IPythonNotebook ###
 # Temporary data
 .ipynb_checkpoints/
+checkpoint/*
+.checkpoints*
 
 
 # Created by https://www.gitignore.io/api/python
