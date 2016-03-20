@@ -2,6 +2,7 @@ import sys
 import igraph
 import func_utils as func
 import copy
+import math
 from collections import defaultdict
 from itertools import takewhile, starmap
 from operator import itemgetter
@@ -41,6 +42,17 @@ def compare(attr1, attr2):
 
     return float(result)
 
+def cosine_similarity(v1,v2):
+    "compute cosine similarity of v1 to v2: (v1 dot v2)/{||v1||*||v2||)"
+    sumxx, sumxy, sumyy = 0, 0, 0
+    for i in range(len(v1)):
+        x = v1[i]; y = v2[i]
+        sumxx += x*x
+        sumyy += y*y
+        sumxy += x*y
+    return sumxy/math.sqrt(sumxx*sumyy)
+
+
 def simularity(graph, indices):
     attributes = []
 
@@ -55,11 +67,10 @@ def simularity(graph, indices):
     results = []
     for i in range(0, len(attributes)):
         for j in range(i+1, len(attributes)):
-            results.append(compare(attributes[i], attributes[j]))
+            results.append(cosine_similarity(attributes[i], attributes[j]))
 
     if len(results) == 0:
         return 0
-
     return reduce(lambda x,y: x+y, results)/float(len(results))
 
 def sum_attributes(x):
@@ -72,34 +83,6 @@ def sum_attributes(x):
 
 
     return result
-
-def calculate_sim_for_comm(graph, index):
-    attr = graph.vs[index]["sim"]
-
-    if isinstance(attr, list) and isinstance(attr[0], list):
-        if(len(attr) > 1):
-            results = []
-            for i in range(0, len(attr)):
-                for j in range(i+1, len(attr)):
-                    results.append(compare(attr[i], attr[j]))
-
-
-            return reduce(lambda x,y: x+y, results)/float(len(results))
-
-    return 0
-
-def calculate_sim(graph, indices):
-    result = []
-
-    for i in range(0, len(indices)):
-        for j in range(i+1, len(indices)):
-            result.append(simularity(graph, indices[i], indices[j]))
-
-    if len(result) == 0:
-        return 0
-
-    return reduce(lambda x,y: x+y, result)/float(len(result))
-
 
 def sac1(graph):
     results = []
@@ -124,6 +107,7 @@ def sac1(graph):
             mod_results = []
             q_newman_cached = {}
             modularity_old = graph.modularity(membership)
+            community_size = len(set(membership))
 
             for comm in range(0, len(membership)):
                 if comm != vert: 
@@ -134,14 +118,17 @@ def sac1(graph):
                         membership_copy[vert] = community
                         modularity_new= graph.modularity(membership_copy)
                         modularity_diff = modularity_new-modularity_old
+                        community_size_new = len(set(membership_copy))
 
                         comm_indices = [i for i, x in enumerate(membership) if x == community]
                         comm_indices_new = [i for i, x in enumerate(membership_copy) if x == community]
                         sim_result_old = simularity(graph, comm_indices)
                         sim_result_new = simularity(graph, comm_indices_new)
 
+                        #print sim_result_old, sim_result_new
+
                         sim_result = (sim_result_new - sim_result_old)
-                        q_newman = alpha*modularity_diff + (1-alpha)*sim_result
+                        q_newman = alpha*modularity_diff + (1-alpha)*(sim_result)/(math.pow(community_size_new, 2))
                         q_newman_cached[community] = q_newman
                         result = (community, q_newman)
                         mod_results.append(result)
@@ -150,7 +137,7 @@ def sac1(graph):
 
             if len(filtered_results) > 0:
                 sorted_results = sorted(filtered_results, key=itemgetter(1), reverse=True)
-                #print vert, sorted_results[0]
+                print vert, sorted_results[0]
                 membership[vert] = sorted_results[0][0]
 
         if len(results) != 0 and results[len(results)-1]== membership:
@@ -190,9 +177,6 @@ def sac1(graph):
             print community_list
 
         graph.vs["community"] = community_list
-
-        optimal_membership_set = set(optimal_membership)
-        delete_vertices_list = filter(lambda x: x not in optimal_membership_set, membership_old)
         #graph.simplify(combine_edges=sum)
 
     return graph.vs["community"]
