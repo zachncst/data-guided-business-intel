@@ -2,6 +2,7 @@ import sys
 import igraph
 import func_utils as func
 import copy
+from collections import defaultdict
 from itertools import takewhile, starmap
 from operator import itemgetter
 
@@ -108,6 +109,7 @@ def sac1(graph):
 
     graph.es["weight"] = weights
     graph.vs["sim"] = attributes
+    #graph.vs["community"] = []
 
     for k in range(0, 15):
         membership = [(x) for x in range(0, graph.vcount())]
@@ -148,12 +150,17 @@ def sac1(graph):
 
             if len(filtered_results) > 0:
                 sorted_results = sorted(filtered_results, key=itemgetter(1), reverse=True)
-                print vert, sorted_results[0]
+                #print vert, sorted_results[0]
                 membership[vert] = sorted_results[0][0]
 
         if len(results) != 0 and results[len(results)-1]== membership:
             print "No further improvements, finished on ", k
-            return results
+            break;
+
+        previous_communities = None
+        if "community" in set(graph.vertex_attributes()):
+            previous_communities = {i:e for i,e in enumerate(graph.vs["community"])}
+            #print previous_communities
 
         results.append(copy.copy(membership))
         optimal_membership = copy.copy(membership)
@@ -169,19 +176,38 @@ def sac1(graph):
             "sim" : lambda x: sum_attributes(x)
         }
         graph.contract_vertices(optimal_membership, combine_attrs=combinations)
+        
+        community_dict = defaultdict(list)
+
+        for k, x in enumerate(optimal_membership):
+            community_dict[x].append(k)
+
+        if previous_communities is None :
+            community_list = [set(community_dict[l]) for l in community_dict]
+        else :
+            community_list = [[previous_communities[c] for c in community_dict[l]] for l in community_dict]
+            community_list = map(lambda x: [item for sublist in x for item in sublist], community_list)
+            print community_list
+
+        graph.vs["community"] = community_list
 
         optimal_membership_set = set(optimal_membership)
         delete_vertices_list = filter(lambda x: x not in optimal_membership_set, membership_old)
         #graph.simplify(combine_edges=sum)
 
-    return results
+    return graph.vs["community"]
 
     
 def main():
     facebook_graph = igraph.load('./data/fb_caltech_small_edgelist.txt')
     final_communities = sac1(facebook_graph)
+    file = open('communities.txt', 'w+')
 
-    #print final_communities
+    for c in final_communities:
+        community = map(lambda x: str(x), c)
+        file.write(", ".join(community) + "\n")
+
+    file.close()
 
 if __name__ == "__main__":
     main()
