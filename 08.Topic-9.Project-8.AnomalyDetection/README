@@ -1,0 +1,8 @@
+bitarray==0.8.1
+numpy===1.10.4
+
+graphs created with gnuplot. example:
+gnuplot> set terminal postscript
+gnuplot> set output '| ps2pdf - voices.pdf'
+gnuplot> plot "voices_time_series.txt", 0.32682291666666663, 0.67317708333333337
+gnuplot> exit
