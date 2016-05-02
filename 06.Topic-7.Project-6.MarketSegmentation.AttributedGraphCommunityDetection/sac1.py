@@ -103,25 +103,36 @@ def sac1(graph):
         print igraph.summary(clustering_old)
 
         #A pass
-        for vert in range(0, len(membership)):
-            mod_results = []
-            q_newman_cached = {}
-            modularity_old = graph.modularity(membership)
-            community_size = len(set(membership))
+        for k in range(0, 15):
+            starting_membership = copy.copy(membership)
 
-            for comm in range(0, len(membership)):
-                if comm != vert: 
-                    community = membership[comm]
+            for vert in range(0, len(membership)):
+                mod_results = []
+                q_newman_cached = {}
+                community_size = len(set(membership))
+
+                vert_old = igraph.VertexClustering(graph, membership=membership)
+                mod_old = vert_old.modularity
+
+                for vertj in range(0, len(membership)):
+                    community = membership[vertj]
 
                     if community not in q_newman_cached:
                         membership_copy = copy.copy(membership)
                         membership_copy[vert] = community
-                        modularity_new= graph.modularity(membership_copy)
-                        modularity_diff = modularity_new-modularity_old
                         community_size_new = len(set(membership_copy))
-
                         comm_indices = [i for i, x in enumerate(membership) if x == community]
                         comm_indices_new = [i for i, x in enumerate(membership_copy) if x == community]
+
+                        vert_new = igraph.VertexClustering(graph, membership=membership_copy)
+                        mod_new = vert_new.modularity
+
+                        modularity_diff = mod_new - mod_old
+
+                        #if modularity_diff > 0:
+                            #print "Modularity", modularity_new, "-", modularity_old, "=", modularity_diff
+                        #print "Mod       ", mod_new, "-", mod_old, "=", modularity_diff
+
                         sim_result_old = simularity(graph, comm_indices)
                         sim_result_new = simularity(graph, comm_indices_new)
 
@@ -133,12 +144,18 @@ def sac1(graph):
                         result = (community, q_newman)
                         mod_results.append(result)
 
-            filtered_results = filter(lambda (c,m): m > 0, mod_results)
+                filtered_results = filter(lambda (c,m): m > 0, mod_results)
 
-            if len(filtered_results) > 0:
-                sorted_results = sorted(filtered_results, key=itemgetter(1), reverse=True)
-                print vert, sorted_results[0]
-                membership[vert] = sorted_results[0][0]
+                if len(filtered_results) > 0:
+                    sorted_results = sorted(filtered_results, key=itemgetter(1), reverse=True)
+                    membership[vert] = sorted_results[0][0]
+
+            diff = reduce(lambda x,y: x+y, map(lambda (x,y): 1 if x != y else 0, zip(starting_membership, membership)), 0)
+            print "Membership diff of", diff
+
+            if starting_membership == membership:
+                print "No further changes can be made"
+                break;
 
         if len(results) != 0 and results[len(results)-1]== membership:
             print "No further improvements, finished on ", k
@@ -177,7 +194,7 @@ def sac1(graph):
             print community_list
 
         graph.vs["community"] = community_list
-        #graph.simplify(combine_edges=sum)
+        graph.simplify(combine_edges=dict(weight="sum"), multiple=True, loops=False)
 
     return graph.vs["community"]
 

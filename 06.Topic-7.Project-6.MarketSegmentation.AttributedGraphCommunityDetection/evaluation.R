@@ -96,7 +96,7 @@ close(conn)
 
 # ===== Clusters From Adaptive K-means ===== #
 attrData <- read.csv("data/fb_caltech_small_attrlist.csv")
-akm = akmeans(attrData, d.metric=2, ths3=.4, mode=3, 
+akm = akmeans(attrData, d.metric=2, ths3=0, mode=3, 
               min.k=length(unique(comm)), max.k=length(unique(comm))) ## cosine distance based
 
 # ===== Influence Propagation Using adaptive k-means clusters ===== #
