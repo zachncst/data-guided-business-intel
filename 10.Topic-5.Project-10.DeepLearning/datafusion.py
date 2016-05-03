@@ -17,11 +17,13 @@
 import sys
 import os
 import string
+from itertools import islice
 import collections as cl
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
 import networkx as nx
+from collections import defaultdict
 #import rawdatacleaner as rdc
 
 def load_textcorpus():
@@ -92,6 +94,10 @@ def build_text_vocab(textfiles):
         ohe_textfiles[w] = i
     return ohe_textfiles
 
+def take(n, iterable):
+    "Return first n items of the iterable as a list"
+    return list(islice(iterable, n))
+
 def build_image_inputouput_set(tags, images, ohe_tags):
     """
         For each image in the training set, generate
@@ -101,9 +107,30 @@ def build_image_inputouput_set(tags, images, ohe_tags):
     """
     image_inputoutput_set = []
 
-    # YOUR CODE HERE
+    for key in images.keys():
+        tag_array = map(lambda x: ohe_tags[x], tags[key])
+        image_array = images[key]
+
+        try :
+            for patch in image_array:
+                image_inputoutput_set.append((patch, tag_array))
+        except:
+            print "key", key, "Unexpected error:", sys.exc_info()[1]
+
+
 
     return image_inputoutput_set
+
+def window(seq, n=2):
+    "Returns a sliding window (of width n) over data from the iterable"
+    "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
+    it = iter(seq)
+    result = tuple(islice(it, n))
+    if len(result) == n:
+        yield result    
+    for elem in it:
+        result = result[1:] + (elem,)
+        yield result
 
 def build_textcorpus_inputoutput_set(textcorpus, ohe_textfiles):
     """
@@ -115,10 +142,14 @@ def build_textcorpus_inputoutput_set(textcorpus, ohe_textfiles):
         Let the input be a list containing the index of the center element
         Let the output be a list containing the indices of the context elements
     """
+    window_size = 5
     textcorpus_inputoutput_set = []
 
-    print textcorpus
-    # YOUR CODE HERE
+    for corpus in textcorpus:
+        for win in window(corpus, n=window_size):
+            left = ohe_textfiles[win[2]]
+            right = map(lambda i: ohe_textfiles[win[i]], filter(lambda x: x != 2, [i for i in range(5)]))
+            textcorpus_inputoutput_set.append((left, right))
 
     return textcorpus_inputoutput_set
 
@@ -209,9 +240,26 @@ def build_adjacency_graph(tags, textcorpus):
         Hint1: Instead of using the images as nodes, you can give your nodes attributes to denote
         "image nodes" and "text nodes"
     """
+    adjacency_graph = nx.Graph()
 
+    # print "tags", take(1, tags.values())
+    # print "textcorpus", take(1, textcorpus)
 
-    # YOUR CODE HERE
+    tags_to_image = defaultdict(list)
+
+    for image_key in tags.keys():
+        adjacency_graph.add_node(image_key, type='image')
+
+        for tg in tags[image_key]:
+            tags_to_image[tg].append(image_key)
+
+    for corpus in textcorpus:
+        for word in corpus:
+            adjacency_graph.add_node(word, type='text')
+
+            if word in tags_to_image:
+                for tg in tags_to_image[word]:
+                    adjacency_graph.add_edge(tg, word)
 
     return adjacency_graph
 
@@ -301,7 +349,7 @@ def main():
         count.update(l)
 
     words = count.keys()
-    print words
+    # print words
 
     vocabulary_size = len(words)
     print vocabulary_size, '   vocab size'
@@ -331,7 +379,7 @@ def main():
         edge_exists = tf.placeholder("float",shape=[1])
 
         with tf.name_scope("skipgram"):
-            (toptimizer, tloss, tembedding) = build_skipgram(text_input,text_truth)
+            (toptimizer, tloss, tembedding) = build_skipgram(text_input,text_truth,vocabulary_size)
 
         with tf.name_scope("cnn"):
             (toptimizer, iloss, iembedding) = build_cnn(image_input, image_truth)
