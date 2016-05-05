@@ -17,6 +17,7 @@
 import sys
 import os
 import string
+import math
 from itertools import islice
 import collections as cl
 import numpy as np
@@ -64,7 +65,8 @@ def load_imagecorpus():
             try :
                 images[iname] = np.load(os.path.join(matrix_dir, iname.split("\\")[0]+os.sep+iname.split("\\")[1].split(".")[0])+".npy")
             except:
-                print "Unexpected error:", sys.exc_info()[1]
+                #print "Unexpected error:", sys.exc_info()[1]
+                pass
 
     return (tags,images)
 
@@ -79,6 +81,7 @@ def build_tag_vocab(tags):
     vocab_size = len(tags)
     for (i,w) in enumerate(tags):
         ohe_tags[w] = i
+
     return ohe_tags
 
 def build_text_vocab(textfiles):
@@ -108,16 +111,22 @@ def build_image_inputouput_set(tags, images, ohe_tags):
     image_inputoutput_set = []
 
     for key in images.keys():
+        zero_array = [0]*len(tags.keys())
         tag_array = map(lambda x: ohe_tags[x], tags[key])
+
+        for tag in tag_array:
+            zero_array[tag] = 1
+
         image_array = images[key]
 
         try :
             for patch in image_array:
-                image_inputoutput_set.append((patch, tag_array))
+                if len(patch) != 127:
+                    raise
+                image_inputoutput_set.append((patch, zero_array))
         except:
-            print "key", key, "Unexpected error:", sys.exc_info()[1]
-
-
+            #print "key", key, "Unexpected error:", sys.exc_info()[1]
+            pass
 
     return image_inputoutput_set
 
@@ -164,22 +173,20 @@ def build_skipgram(text_input, text_output, vocabulary_size):
         Return the optimization operation, the loss and the embedding weight for text_input
     """
     embedding_size = 300
+    num_sampled = 100
+
     embeddings = tf.Variable(tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0))
 
     nce_weights = tf.Variable(tf.truncated_normal([vocabulary_size, embedding_size], stddev=1.0/math.sqrt(embedding_size)))
     nce_biases = tf.Variable(tf.zeros([vocabulary_size]))
 
-    #Placeholders for inputs
-    train_inputs = tf.placeholder(tf.int32, shape=[batch_size])
-    train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
-
-    embedding = tf.nn.embedding_lookup(embeddings, train_inputs)
+    embedding = tf.nn.embedding_lookup(embeddings, text_input)
 
     #Computer the NCE Loss, using a sample of the negative labels each time
-    loss = tf.reduce_mean(tf.nn.nce_loss(nce_weights, nce_biases, embedding, train_labels, num_sampled, vocabulary_size))
+    loss = tf.reduce_mean(tf.nn.nce_loss(nce_weights, nce_biases, embedding, text_output, num_sampled, vocabulary_size))
 
     #we use the SGD optimizer
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0).minimum(loss)
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=1.0).minimize(loss)
 
     return (loss, optimizer, embedding)
 
@@ -192,7 +199,7 @@ def bias_variable(shape):
   return tf.Variable(initial)
 
 def conv2d(x, W):
-  return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+  return tf.nn.conv2d(x, W, strides=[1, 2, 2, 1], padding='SAME')
 
 def max_pool_2x2(x):
   return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
@@ -211,17 +218,23 @@ def build_cnn(image_input, image_output, tag_size):
 
         Set the embedding weight vector equal to the output of the first convolutional layer (without drop-out)
     """
-    W_conv1 = weight_variable([5, 5, 2, 32])
+    W_conv1 = weight_variable([5, 5, 1, 32])
     b_conv1 = bias_variable([32])
 
-    x_image = tf.reshape(x, [-1, 28, 28, 1])
+    x_image = tf.reshape(image_input, [-1, 127, 127, 1])
     h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
     h_pool1 = max_pool_2x2(h_conv1)
+    h_pool1_flat = tf.reshape(h_pool1, [-1, 32])
 
-    W_fc2 = weight_variable([1024, 10])
-    b_fc2 = bias_variable([10])
+    W_fc1 = weight_variable([32, 1024])
+    b_fc1 = bias_variable([1024])
 
-    y_conv2 = tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+    y_conv1 = tf.nn.softmax(tf.matmul(h_pool1_flat, W_fc1) + b_fc1)
+    cnn_embedding = y_conv1
+
+    W_fc2 = weight_variable([1024, tag_size])
+    b_fc2 = bias_variable([tag_size])
+    y_conv2 = tf.nn.softmax(tf.matmul(y_conv1, W_fc2) + b_fc2)
 
     #Include this as part of code.
     loss = -tf.reduce_sum(image_output*tf.log(y_conv2))
@@ -270,7 +283,18 @@ def build_noise_list(agraph):
         words and images that should not be close.
     """
 
-    # YOUR CODE HERE
+    noise_list = []
+
+    for node in nodes(agraph):
+        for non_neighbor in nx.non_neighbors(agraph, node):
+            if node[type] != non_neight[type]:
+                noise_list.append((node, non_neighbor))
+
+            if len(noise_list) >= 1000:
+                break
+
+        if len(noise_list) >= 1000:
+                break
 
     return noise_list
 
@@ -280,9 +304,9 @@ def data_fusion_loss_function(pdi, pdt, edge_exists):
     """
 
     # Compute the dot-product of pdi and pdt and multiply by the negated edge_exists (-1 if 1, 1 if negative 1)
-    # YOUR CODE HERE
 
-    loss_function = tf.constant(1)
+    dotprod = tf.Variable(-edge_exists*tf.matmul(tf.transpose(pdi), pdt))
+    loss_function = tf.log(1 + tf.exp(dotprod))
 
     return (dotprod, loss_function);
 
@@ -298,29 +322,34 @@ def build_data_fusion_layer(t_embedding, i_embedding, edge_exists):
 
         Set the embedding dimension for this new projection layer to be 150
     """
-
     # Incorporating dropout on the hidden layer:
     dropped_tembedding = tf.nn.dropout(t_embedding, keep_prob=.5)
     dropped_iembedding = tf.nn.dropout(i_embedding, keep_prob=.5)
 
     # Create the variables associated with the transformation weights
     #Using fromula 16 from the paper
-    # YOUR CODE HERE
     d = 150
 
+    #bt = tf.constant(1)
+    #embeddings = tf.Variable(tf.random_uniform([d, 1024], -1.0, 1.0))
+
+    #def qdt(z) :
+    #    return tf.maximum(0, tf.matmul(embeddings, z) + bt)
+
+    #pdi = qdt(dropped_tembedding)
+    #pdt = qdt(dropped_tembedding)
+
+    Ut = tf.Variable(tf.random_uniform([d, 1024], -1.0, 1.0))
+    Uz = tf.Variable(tf.random_uniform([d, 1024], -1.0, 1.0))
+
     # Transform the embeddings with Uz and Ut
-
-    # 
-    # Transform the embeddings with Uz and Ut
-    # pdi = tf.constant(1)
-    # pdt = tf.constant(1)
-
-
+    pdi = tf.matmul(Ut, dropped_iembedding)
+    pdt = tf.matmul(Uz, dropped_tembedding)
 
     (dropprod, loss_function) = data_fusion_loss_function(pdi, pdt, edge_exists)
     optimizer = tf.train.GradientDescentOptimizer(1.0).minimize(loss_function)
 
-    return (optimizer, loss_function, Ut, Ui, dropprod, pdi, pdt)
+    return (optimizer, loss_function, Ut, Uz, dropprod, pdi, pdt)
 
 
 def query(sess, pdi, pdt, image, frequent_words):
@@ -329,9 +358,16 @@ def query(sess, pdi, pdt, image, frequent_words):
         associated with the image using the vectors generated by the heterogeneous
         data fusion method
     """
-    # YOUR CODE HERE
+    words = []
 
-    pass
+    for word in frequent_words:
+        _,_,_,_, drop = sess.run([doptimizer, dloss], {image_input:image, \
+            image_truth: pdi, text_input:batch[1], text_truth: pdt, edge_exists:[1]})
+
+        if drop > 0:
+            words.append(word)
+
+    return words
 
 def main():
     print "running main"
@@ -352,6 +388,7 @@ def main():
     # print words
 
     vocabulary_size = len(words)
+    tag_size = len(image_tags)
     print vocabulary_size, '   vocab size'
     freq_words = count.most_common(1000)
 
@@ -367,67 +404,112 @@ def main():
 
     relationgraph = build_adjacency_graph(image_tags, text)
 
-    learning_embedding = tf.Graph()
-    with learning_embedding.as_default():
-        image_input = tf.placeholder("float",shape=(127,127))
-        blank_image = np.zeros(127)
-        image_truth = tf.placeholder("float",shape=[None,1])
-
+    with tf.Graph().as_default() as g:
         text_input = tf.placeholder("int32",shape=[None])
-        text_truth = tf.placeholder("float",shape=[None, 1])
+        text_truth = tf.placeholder("float",shape=[None, None])
+
+        image_input = tf.placeholder("float",shape=[127,127])
+        blank_image = np.zeros(127)
+        image_truth = tf.placeholder("float",shape=[None, None])
 
         edge_exists = tf.placeholder("float",shape=[1])
 
         with tf.name_scope("skipgram"):
-            (toptimizer, tloss, tembedding) = build_skipgram(text_input,text_truth,vocabulary_size)
+            (toptimizer, tloss, tembedding) = build_skipgram(text_input, text_truth, vocabulary_size)
 
         with tf.name_scope("cnn"):
-            (toptimizer, iloss, iembedding) = build_cnn(image_input, image_truth)
+            (ioptimizer, iloss, iembedding) = build_cnn(image_input, image_truth, tag_size)
 
         with tf.name_scope("data_fusion_layer"):
             (doptimizer, dloss, Ut, Uz, dropprod, pdi, pdt) = build_data_fusion_layer(tembedding, iembedding, edge_exists)
 
-    with tf.Session(graph=comp) as sess:
-        tf.initialize_all_variables().run()
+        with tf.Session(graph=g) as sess:
+            print "Start initialize"
+            init_op = tf.initialize_all_variables()
+            try :
+                sess.run(init_op)
+            except:
+                pass
 
-        for batch in image_learning:
-            _,loss = sess.run([toptimizer, tloss],{image_input:batch[0], \
-                image_truth:batch[1], text_input:[[]], text_truth:[], edge_exists:[-1]})
+            print "Start image_learning"
+            i = 0
 
-        # Now, train the skipgram neural network. Look to the previous for loop
-        # for suggestions on how to perform this
+            #with tf.name_scope("cnn"):
+            for batch in image_learning:
+                i += 1
+                if i % 100 == 0:
+                    print i, "iteration of", len(image_learning)
+                
+                _,loss = sess.run([ioptimizer, iloss],{image_input:batch[0], \
+                    image_truth:[batch[1]], text_input:[], text_truth:[[]], edge_exists:[-1]})
 
-        # YOUR CODE HERE
+            # Now, train the skipgram neural network. Look to the previous for loop
+            # for suggestions on how to perform this
+            print "Stop image_learning"
 
-        for i in range(0,num_iters):
-            noise_list = build_noise_list(relationgraph)
+            i = 0
 
-            # Normally you would permute this. However, due to the large size of each list,
-            # this permuation step would dominate training.
+            print "Start text_learning"
 
+            for batch in text_learning:
+                i += 1
+                if i % 100 == 0:
+                    print i, "iteration of", len(text_learning)
+                _,loss = sess.run([toptimizer, tloss],{image_input:[[]], \
+                    image_truth:[], text_input:batch[0], text_truth:batch[1], edge_exists:[-1]})
+
+            print "Stop text_learning"
+
+            for i in range(0,num_iters):
+                print "before noise list"
+                noise_list = build_noise_list(relationgraph)
+                print "after noise list"
+
+                # Normally you would permute this. However, due to the large size of each list,
+                # this permuation step would dominate training.
+                i = 0
+
+                print "before fusion 1"
+                for batch in relationgraph.edges():
+                    i += 1
+                    if i % 100 == 0:
+                        print i, "iteration of", len(relationgraph.edges())
+
+                    _,loss = sess.run([doptimizer, dloss], {image_input:batch[0], \
+                        image_truth:[], text_input:batch[1], text_truth:[], edge_exists:[1]})
+
+                print "after fusion 1"
+                # Now, train the data fusion layer by passing each image_word pair that should not be adjacent in the noise_list
+                # by passing the tuples one at a time, with edge_exists equal to -1
+                print "before fusion 2"
+_
+                for batch in noise_list:
+                    i += 1
+                    if i % 100 == 0:
+                        print i, "iteration of", len(noise_list)
+
+                    _,loss = sess.run([doptimizer, dloss], {image_input:batch[0], \
+                        image_truth:[], text_input:batch[1], text_truth:[], edge_exists:[-1]})
+
+                print "after fusion 2"
+
+            edges_predicted = 0
             for batch in relationgraph.edges():
-                _,loss = sess.run([doptimizer, dloss], {image_input:batch[0], \
-                    image_truth:[], text_input:batch[1], text_truth:[], edge_exists:[1]})
+                # For each batch, get the value of the dropprod computed by the computational graph
+                # If this value is above zero, increment edges_predicted by one
+                _,_,_,_, drop = sess.run([doptimizer, dloss], {image_input:batch[0], \
+                        image_truth:[], text_input:batch[1], text_truth:[], edge_exists:[1]})
 
-            # Now, train the data fusion layer by passing each image_word pair that should not be adjacent in the noise_list
-            # by passing the tuples one at a time, with edge_exists equal to -1
+                if drop > 0:
+                    edges_predicted += 1
 
-            # YOUR CODE HERE
-
-        edges_predicted = 0
-        for batch in relationgraph.edges():
-            # For each batch, get the value of the dropprod computed by the computational graph
-            # If this value is above zero, increment edges_predicted by one
-            pass
-            # YOUR CODE HERE
-
-        print "--------------------------------"
-        print "Reconstruction Error: %d" % (relationgraph.num_of_edges/edges_predicts)
-        print "--------------------------------"
-        print "Image 100 Tags"
-        print image_tags[image[100]]
-        print query(sess, pdi, pdt, images[100], image_tags[images[100]], frequent_words)
-        print zip([1,0],["a","b","c"])
+            print "--------------------------------"
+            print "Reconstruction Error: %d" % (relationgraph.num_of_edges/edges_predicts)
+            print "--------------------------------"
+            print "Image 100 Tags"
+            print image_tags[image[100]]
+            print query(sess, pdi, pdt, images[100], image_tags[images[100]], freq_words)
+            print zip([1,0],["a","b","c"])
 
 if __name__ == "__main__":
     main()
